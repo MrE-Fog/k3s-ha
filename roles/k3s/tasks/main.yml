@@ -94,7 +94,7 @@
   delegate_to: localhost
   retries: 20
   delay: 3
-  until: nodes.resources | json_query(query_nodes) | selectattr('ready', 'equalto', 'False') | length == 0
+  until: nodes.resources | json_query(query_nodes) | selectattr('ready', 'equalto', 'False') | list | length == 0
 
 - name: setup k3s (managers)
   command: /tmp/k3s.sh --config /etc/rancher/k3s/config.yaml
@@ -113,5 +113,5 @@
   retries: 20
   delay: 3
   until: >
-    nodes.resources | json_query(query_nodes) | selectattr('ready', 'equalto', 'False') | length == 0
-    and nodes.resources | json_query(query_nodes) | length == groups['k3s_managers'] | length
+    nodes.resources | json_query(query_nodes) | selectattr('ready', 'equalto', 'False') | list | length == 0
+    and nodes.resources | json_query(query_nodes) | list | length == groups['k3s_managers'] | list | length
