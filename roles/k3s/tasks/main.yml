@@ -1,18 +1,14 @@
 ---
-- name: Gather facts
-  setup:
-  become: yes
-
 - name: download k3s setup script
   get_url:
     url: https://get.k3s.io
     dest: /tmp/k3s.sh
     mode: 0755
 
-- name: check if k3s config directory already exists
+- name: check if k3s directory already exists
   stat:
-    path: /etc/rancher/k3s
-  register: etck3s
+    path: /var/lib/rancher/k3s/agent
+  register: k3sAgentDir
 
 - name: create /etc/rancher/k3s
   file:
@@ -23,7 +19,6 @@
     group: root
     mode: 0755
   become: yes
-  when: not etck3s.stat.exists
 
 - name: generate config file
   template:
@@ -33,28 +28,31 @@
     group: root
     mode: 0644
   become: yes
-  when: inventory_hostname == groups['k3s_managers'][0] and not etck3s.stat.exists
 
 - name: setup k3s
-  command: /tmp/k3s.sh --config /etc/rancher/k3s/config.yaml
+  command: /tmp/k3s.sh
   become: yes
-  when: inventory_hostname == groups['k3s_managers'][0] and not etck3s.stat.exists
+  environment:
+    - INSTALL_K3S_VERSION: "{{ k3s_install_k3s_version }}"
   run_once: yes
+  when: >
+    inventory_hostname == first_node
+    and not k3sAgentDir.stat.exists
 
 - name: wait for token file to populate
   wait_for:
     path: /var/lib/rancher/k3s/server/token
   become: yes
-  when: inventory_hostname == groups['k3s_managers'][0]
   run_once: yes
+  when: inventory_hostname == first_node
 
 - name: get join token
   slurp:
     src: /var/lib/rancher/k3s/server/token
   become: yes
   register: k3s_cluster_token
-  when: inventory_hostname == groups['k3s_managers'][0]
   run_once: yes
+  when: inventory_hostname == first_node
 
 - name: generate config file
   template:
@@ -64,54 +62,53 @@
     group: root
     mode: 0644
   become: yes
-  when: not etck3s.stat.exists
-
-- name: fetch kubeconfig
-  fetch:
-    src: /etc/rancher/k3s/k3s.yaml
-    dest: "/tmp/{{ inventory_hostname }}-config.yml"
-    flat: yes
-    mode: 0600
-  become: yes
-  when: inventory_hostname == groups['k3s_managers'][0]
-
-- name: patch host in kubeconfig
-  lineinfile:
-    path: "/tmp/{{ inventory_hostname }}-config.yml"
-    regexp: "^    server: https://127.0.0.1:6443$"
-    line: "    server: https://{{ inventory_hostname }}:6443"
-    state: present
-  when: inventory_hostname == groups['k3s_managers'][0]
-  delegate_to: localhost
 
 - name: get nodes
-  k8s_info:
-    api_version: v1
-    kind: Node
-    kubeconfig: "/tmp/{{ inventory_hostname }}-config.yml"
+  command: kubectl get nodes
   register: nodes
-  when: inventory_hostname == groups['k3s_managers'][0]
-  delegate_to: localhost
+  run_once: yes
   retries: 20
   delay: 3
-  until: nodes.resources | json_query(query_nodes) | selectattr('ready', 'equalto', 'False') | list | length == 0
+  until: nodes.stdout | regex_findall('Ready') | length | int > 0 | int
+
+- name: check for cacerts to be available
+  uri:
+    url: "https://{{ first_node }}:6443/cacerts"
+    validate_certs: no
+  register: cacerts
+  run_once: yes
+  when: inventory_hostname == first_node
+  delay: 3
+  retries: 20
+  until: cacerts.content_length | int > 0 | int
 
 - name: setup k3s (managers)
-  command: /tmp/k3s.sh --config /etc/rancher/k3s/config.yaml
+  command: /tmp/k3s.sh
   become: yes
+  environment:
+    - INSTALL_K3S_VERSION: "{{ k3s_install_k3s_version }}"
   throttle: 1
-  when: inventory_hostname != groups['k3s_managers'][0] and not etck3s.stat.exists
+  when: >
+    inventory_hostname != first_node
+    and not k3sAgentDir.stat.exists
 
 - name: get nodes
-  k8s_info:
-    api_version: v1
-    kind: Node
-    kubeconfig: "/tmp/{{ inventory_hostname }}-config.yml"
+  command: kubectl get nodes
   register: nodes
-  when: inventory_hostname == groups['k3s_managers'][0]
-  delegate_to: localhost
+  run_once: yes
   retries: 20
   delay: 3
-  until: >
-    nodes.resources | json_query(query_nodes) | selectattr('ready', 'equalto', 'False') | list | length == 0
-    and nodes.resources | json_query(query_nodes) | list | length == groups['k3s_managers'] | list | length
+  until: nodes.stdout | regex_findall('Ready') | length | int == ansible_play_hosts | length | int
+
+- package_facts:
+
+- name: enable kubectl bash completion at login
+  lineinfile:
+    line: . <(kubectl completion bash)
+    path: ~root/.bash_aliases
+    create: yes
+    state: present
+    owner: root
+    group: root
+    mode: 0700
+  when: "'bash-completion' in packages"

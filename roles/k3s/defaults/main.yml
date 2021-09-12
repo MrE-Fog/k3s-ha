@@ -1,7 +1,11 @@
-query_nodes: "[].{name: metadata.name, ready: status.conditions[?type == 'Ready'].status | [0], labels: metadata.labels, master: metadata.labels.\"node-role.kubernetes.io/master\"}"
-k3s_config:
-  common:
-    # INSTALL_K3S_VERSION:
-    INSTALL_K3S_CHANNEL: latest
-  managers: {}
-  workers: {}
+---
+k3s_disable: []
+#  - servicelb
+#  - traefik
+#  - local-storage
+k3s_secrets_encryption: no
+k3s_disable_cloud_controller: yes
+k3s_install_k3s_version: v1.21.4+k3s1
+k3s_etcd_snapshot_retention: 7
+k3s_etcd_snapshot_schedule_cron: 0 0 * * *
+k3s_etcd_expose_metrics: yes

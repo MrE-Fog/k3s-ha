@@ -1,8 +1,32 @@
 ---
-{% if inventory_hostname == groups['k3s_managers'][0] %}
-cluster-init: true
+{% if inventory_hostname == first_node %}
+{# config for only first node #}
+
+cluster-init: yes
+
 {% else %}
-server: "https://{{ groups['k3s_managers'][0] }}:6443"
+{# config for all nodes *other than* the first node #}
+
+server: "https://{{ first_node }}:6443"
+
 {% if k3s_cluster_token is defined %}token: "{{ k3s_cluster_token.content | b64decode | trim }}"
 {% endif %}
 {% endif %}
+
+{% if inventory_hostname in groups['k3s_managers'] %}
+{# config for only managers #}
+etcd-expose-metrics: {{ k3s_etcd_expose_metrics }}
+etcd-snapshot-retention: {{ k3s_etcd_snapshot_retention }}
+etcd-snapshot-schedule-cron: {{ k3s_etcd_snapshot_schedule_cron }}
+{% endif %}
+
+{# config for all nodes / unrestricted #}
+
+{# avoid deploying whatever is defined #}
+{% if k3s_disable is defined and k3s_disable | length > 0 %}
+disable:
+{{ k3s_disable | to_nice_yaml }}
+{% endif %}
+
+secrets-encryption: {{ k3s_secrets_encryption }}
+disable-cloud-controller: {{ k3s_disable_cloud_controller }}
